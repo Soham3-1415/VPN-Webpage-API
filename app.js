@@ -25,10 +25,14 @@ const XMLHttpRequest = require('xmlhttprequest').XMLHttpRequest;
 const hostnameWhitelist = ['vpn.sohamroy.me'];
 const nodemailer = require('nodemailer');
 
+const unkownServerFail = () => {
+    return res.sendStatus(500).json({ error: 'Oops.' });
+};
+
 const vaultCertLookup = (xhr, res, action) => {
     const response = JSON.parse(xhr.responseText);
     if(response.errors)
-        return res.status(400).json({ error: 'No cert found.' });
+        return res.sendStatus(400).json({ error: 'No cert found.' });
     else
         action(xhr,res);
 };
@@ -38,23 +42,42 @@ const vaultSolveChallenge = (xhr,res) => {
     const response = JSON.parse(xhr.responseText);
     if(!response.challengeSolved) { // Deal with unsolved challenge
         xhr.open('put', `${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
-        vaultRequest(xhr, serialmapToken, () => {}, () => {}, JSON.stringify({challengeSolved: true}));
+        vaultRequest(xhr, serialmapToken, () => { return res.send({ response: 'Success.' }); }, unkownServerFail, JSON.stringify({challengeSolved: true}));
     }
     else {
-
+        return res.send({ response: 'Challenge already solved.' });
     }
-    return res.send({ response: 'Success.' });
 };
 
 const vaultGetCert = (xhr,res) => {
-
+    const cn = path.parse(url.parse(xhr.responseURL).pathname).name;
+    const response = JSON.parse(xhr.responseText);
+    if(!response.challengeSolved) { return res.sendStatus(400).json({ error: 'Cert not approved.' }); }
+    if(!response.serial) { return res.sendStatus(400).json({ error: 'No cert found.' }); }
+    const serial = response.serial;
+    const sendCert = () => {
+        const response = JSON.parse(xhr.responseText);
+        if(response.errors || !response.data.certificate) { return unkownServerFail(); }
+        return res.send({ response: 'Success.', cert: response.data.certificate });
+    };
+    xhr.open('get', `${vault_addr}${vaultPkiEndpoint}/cert/${serial}`, true);
+    vaultRequest(xhr, pkiPublicToken, sendCert, unkownServerFail);
 };
 
 const vaultGenCert = (xhr,res) => {
+    const cn = path.parse(url.parse(xhr.responseURL).pathname).name;
+    const response = JSON.parse(xhr.responseText);
+    if(!response.challengeSolved) { return res.sendStatus(400).json({ error: 'Cert not approved.' }); }
+    if(response.serial) { return res.sendStatus(400).json({ error: 'Cert already exists.' }); }
+    const serial = response.serial;
 
 };
 
 const vaultSignCert = (xhr,res) => {
+    const cn = path.parse(url.parse(xhr.responseURL).pathname).name;
+    const response = JSON.parse(xhr.responseText);
+    if(!response.challengeSolved) { return res.sendStatus(400).json({ error: 'Cert not approved.' }); }
+    if(response.serial) { return res.sendStatus(400).json({ error: 'Cert already exists.' }); }
 
 };
 
@@ -94,21 +117,13 @@ const sendRegistrationConfirmation = (address,code) => {
 app.use(bodyParser.json());
 
 app.get(endpoint + '/get-ca',(req,res)=>{
-    res.send({'cert':ca});
+    return res.send({'cert':ca});
 });
 
-// app.post(endpoint + '/getcert',(req,res)=>{
-//
-// });
-
-// app.post(endpoint + '/signcsr',(req,res)=>{
-//
-// });
-
-app.post(endpoint + '/solvechallenge', [check('email').isEmail(),check('code').isBase64],(req,res)=>{
+app.post(endpoint + '/getcert', [check('email').isEmail(),check('code').isBase64], (req,res)=>{
     const errors = validationResult(req);
     if (!errors.isEmpty())
-        return res.status(400).json({ error: 'Invalid email or code.' });
+        return res.sendStatus(400).json({ error: 'Invalid email or code.' });
 
     const email = req.body.email;
     const code  = req.body.code;
@@ -121,8 +136,12 @@ app.post(endpoint + '/solvechallenge', [check('email').isEmail(),check('code').i
 
     const xhrVault = new XMLHttpRequest();
     xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
-    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(xhrVault,res,vaultSolveChallenge); }, () => {});
+    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(xhrVault,res,vaultGetCert); }, unkownServerFail);
 });
+
+// app.post(endpoint + '/signcsr',(req,res)=>{
+//
+// });
 
 // app.post(endpoint + '/genp12',(req,res)=>{
 //     forge.pki.certificateFromPem(pem);
@@ -130,22 +149,41 @@ app.post(endpoint + '/solvechallenge', [check('email').isEmail(),check('code').i
 //     forge.pkcs12.toPkcs12Asn1(privateKey, certificateChain, 'password');
 // });
 
+app.post(endpoint + '/solvechallenge', [check('email').isEmail(),check('code').isBase64], (req,res)=>{
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+        return res.sendStatus(400).json({ error: 'Invalid email or code.' });
+
+    const email = req.body.email;
+    const code  = req.body.code;
+
+    const cnHash = crypto.createHash('sha384');
+    const secret = Buffer.from(code, 'base64');
+    cnHash.update(email);
+    cnHash.update(secret);
+    const cn = cnHash.digest('base64').substr(0,64);
+
+    const xhrVault = new XMLHttpRequest();
+    xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
+    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(xhrVault,res,vaultSolveChallenge); }, unkownServerFail);
+});
+
 app.post(endpoint + '/signup', [check('email').isEmail()],(req,res)=>{
     const errors = validationResult(req);
     if (!errors.isEmpty())
-        return res.status(400).json({ error: 'Invalid email.' });
+        return res.sendStatus(400).json({ error: 'Invalid email.' });
 
     const xhr = new XMLHttpRequest();
     xhr.open('post','https://www.google.com/recaptcha/api/siteverify', true);
 
     if(!req.body.captcha)
-        return res.status(400).json({ error: 'Missing captcha token.' });
+        return res.sendStatus(400).json({ error: 'Missing captcha token.' });
 
     const success = () => {
         const email = req.body.email;
         const captchaVerification = JSON.parse(xhr.responseText);
         if(!captchaVerification.success || !hostnameWhitelist.includes(captchaVerification.hostname))
-            return res.status(400).json({ error: 'Invalid captcha response.' });
+            return res.sendStatus(400).json({ error: 'Invalid captcha response.' });
 
         const cnHash = crypto.createHash('sha384');
         const secret = crypto.randomBytes(384/8);
@@ -155,7 +193,7 @@ app.post(endpoint + '/signup', [check('email').isEmail()],(req,res)=>{
 
         const xhrVault = new XMLHttpRequest();
         xhrVault.open('post',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
-        vaultRequest(xhrVault, serialmapToken, () => {}, () => {}, JSON.stringify({challengeSolved:false}));
+        vaultRequest(xhrVault, serialmapToken, () => {}, unkownServerFail, JSON.stringify({challengeSolved:false}));
 
         sendRegistrationConfirmation(email, secret.toString('base64'));
 
@@ -163,7 +201,7 @@ app.post(endpoint + '/signup', [check('email').isEmail()],(req,res)=>{
     };
 
     const fail = () => {
-        return res.status(500).json({ error: 'Captcha processing error.' });
+        return res.sendStatus(500).json({ error: 'Captcha processing error.' });
     };
 
     request(xhr, success, fail, 'application/x-www-form-urlencoded', `secret=${captchaSecret}&response=${req.body.captcha}&remoteip=${req.connection.remoteAddress}`);
@@ -171,12 +209,12 @@ app.post(endpoint + '/signup', [check('email').isEmail()],(req,res)=>{
 
 // 404
 app.use(function(req, res, next) {
-    return res.status(404).send({ error: 'Route '+req.url+' Not found.' });
+    return res.sendStatus(404).send({ error: 'Route '+req.url+' Not found.' });
 });
 
 // 500 - Any server error
 app.use(function(err, req, res, next) {
-    return res.status(500).send({ error: 'Server error.' });
+    return res.sendStatus(500).send({ error: 'Server error.' });
 });
 
 app.listen(process.env.NODE_PORT || 3000);
