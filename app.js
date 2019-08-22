@@ -110,7 +110,7 @@ const sendRegistrationConfirmation = (address,code) => {
 
 app.use(bodyParser.json());
 
-app.get(endpoint + '/get-ca',(req,res)=>{
+app.get(endpoint + '/getca',(req,res)=>{
     return res.json({'cert':ca});
 });
 
