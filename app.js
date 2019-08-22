@@ -87,14 +87,15 @@ const vaultGenCert = (response,res,input) => {
         const key = forge.pki.privateKeyFromPem(responseGenCert.data.private_key);
         const pkcs12Asn1 = forge.pkcs12.toPkcs12Asn1(key, [ca,cert], input.code);
         const pkcs12Der = forge.asn1.toDer(pkcs12Asn1).getBytes();
-        const pkcs12 = forge.util.encode64(pkcs12Der);
+        const pkcs12Buff = Buffer.from(pkcs12Der,'binary');
+        const pkcs12Base64 = pkcs12Buff.toString('base64');
 
-        sendPKCS12(input.email, pkcs12);
+        sendPKCS12(input.email, pkcs12Buff);
 
-        return res.json({ response: 'Success.', pkcs12: pkcs12 });
+        return res.json({ response: 'Success.', pkcs12: pkcs12Base64 });
     };
     xhr.open('post', `${vault_addr}${vaultPkiEndpoint}/issue/client`, true);
-    vaultRequest(xhr, pkiClientToken, genCert, () => { return unknownServerFail(res) }, certConfig);
+    vaultRequest(xhr, pkiClientToken, genCert, () => { return unknownServerFail(res) }, JSON.stringify(certConfig));
 };
 
 const vaultSignCert = (response,res,input) => {
@@ -137,7 +138,7 @@ const sendRegistrationConfirmation = (address,code) => {
     });
 };
 
-const sendPKCS12 = (address,p12) => {
+const sendPKCS12 = (address,pkcs12) => {
     transporter.sendMail({
         from: 'Soham Roy VPN CA <ca@vpn.sohamroy.me>',
         to: address,
@@ -145,7 +146,7 @@ const sendPKCS12 = (address,p12) => {
         text: `Attached is the PKCS#12 file to access the VPN service. The password is your code.\n\nDo not reply to this email.`,
         attachments: [{
             filename: 'user.p12',
-            content: p12,
+            content: pkcs12,
             contentType: 'application/x-pkcs12'
         }]
     });
@@ -169,7 +170,7 @@ app.post(endpoint + '/getcert', [check('email').isEmail(),check('code').isBase64
     const secret = Buffer.from(code, 'base64');
     cnHash.update(email);
     cnHash.update(secret);
-    const cn = cnHash.digest('base64').substr(0,64);
+    const cn = cnHash.digest('base64').substr(0,63);
     const xhrVault = new XMLHttpRequest();
     xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
     vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,{cn:cn},vaultGetCert); }, () => { return unknownServerFail(res) });
@@ -191,7 +192,7 @@ app.post(endpoint + '/genp12', [check('email').isEmail(),check('code').isBase64(
     const secret = Buffer.from(code, 'base64');
     cnHash.update(email);
     cnHash.update(secret);
-    const cn = cnHash.digest('base64').substr(0,64);
+    const cn = cnHash.digest('base64').substr(0,63);
     const xhrVault = new XMLHttpRequest();
     xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
     vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,{cn:cn,code:code,email:email},vaultGenCert); }, () => { return unknownServerFail(res) });
@@ -209,7 +210,7 @@ app.post(endpoint + '/solvechallenge', [check('email').isEmail(),check('code').i
     const secret = Buffer.from(code, 'base64');
     cnHash.update(email);
     cnHash.update(secret);
-    const cn = cnHash.digest('base64').substr(0,64);
+    const cn = cnHash.digest('base64').substr(0,63);
 
     const xhrVault = new XMLHttpRequest();
     xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
@@ -237,7 +238,7 @@ app.post(endpoint + '/signup', [check('email').isEmail()],(req,res) => {
         const secret = crypto.randomBytes(384/8);
         cnHash.update(email);
         cnHash.update(secret);
-        const cn = cnHash.digest('base64').substr(0,64);
+        const cn = cnHash.digest('base64').substr(0,63);
 
         const xhrVault = new XMLHttpRequest();
         xhrVault.open('post',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
