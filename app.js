@@ -25,21 +25,25 @@ const XMLHttpRequest = require('xmlhttprequest').XMLHttpRequest;
 const hostnameWhitelist = ['vpn.sohamroy.me'];
 const nodemailer = require('nodemailer');
 
+const certConfigGeneral = {
+    ttl: '24h'
+};
+
 const unknownServerFail = (res) => {
     return res.status(500).json({ error: 'Oops.' });
 };
 
-const vaultCertLookup = (response, res, cn, action) => {
+const vaultCertLookup = (response, res, input, action) => {
     if(response.errors)
         return res.status(404).json({ error: 'No cert found.' });
     else
-        action(response,res,cn);
+        action(response,res,input);
 };
 
-const vaultSolveChallenge = (response,res,cn) => {
+const vaultSolveChallenge = (response,res,input) => {
     if(!response.data.challengeSolved) { // Deal with unsolved challenge
         const xhr = new XMLHttpRequest();
-        xhr.open('put', `${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
+        xhr.open('put', `${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(input.cn)}`, true);
         vaultRequest(xhr, serialmapToken, () => { return res.json({ response: 'Success.' }); }, () => { return unknownServerFail(res) }, JSON.stringify({challengeSolved: true}));
     }
     else {
@@ -47,31 +51,56 @@ const vaultSolveChallenge = (response,res,cn) => {
     }
 };
 
-const vaultGetCert = (response,res,cn) => {
+const vaultGetCert = (response,res,input) => {
     if(!response.data.challengeSolved) { return res.status(402).json({ error: 'Cert not approved.' }); }
     if(!response.data.serial) { return res.status(404).json({ error: 'No cert found.' }); }
     const serial = response.data.serial;
     const xhr = new XMLHttpRequest();
     const sendCert = () => {
         const response = JSON.parse(xhr.responseText);
-        if(response.errors || !response.data.certificate) { return unknownServerFail(res); }
+        if(response.errors) { return unknownServerFail(res); }
         return res.json({ response: 'Success.', cert: response.data.certificate });
     };
     xhr.open('get', `${vault_addr}${vaultPkiEndpoint}/cert/${serial}`, true);
     vaultRequest(xhr, pkiPublicToken, sendCert, () => { return unknownServerFail(res) });
 };
 
-const vaultGenCert = (response,res,cn) => {
+const vaultGenCert = (response,res,input) => {
     if(!response.data.challengeSolved) { return res.status(402).json({ error: 'Cert not approved.' }); }
     if(response.data.serial) { return res.status(403).json({ error: 'Cert already exists.' }); }
-    const serial = response.data.serial;
+    const certConfig = certConfigGeneral;
+    certConfig.common_name = input.cn;
+    const xhr = new XMLHttpRequest();
+    const genCert = () => {
+        const responseGenCert = JSON.parse(xhr.responseText);
+        if(responseGenCert.errors) { return unknownServerFail(res); }
 
+        const updatedSerial = response.data;
+        updatedSerial.serial = responseGenCert.data.serial_number;
+
+        const xhrVault = new XMLHttpRequest();
+        xhrVault.open('post',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(input.cn)}`, true);
+        vaultRequest(xhrVault, serialmapToken, () => {}, () => { return unknownServerFail(res) }, JSON.stringify(updatedSerial));
+
+        const cert = forge.pki.certificateFromPem(responseGenCert.data.certificate);
+        const ca = forge.pki.certificateFromPem(responseGenCert.data.issuing_ca);
+        const key = forge.pki.privateKeyFromPem(responseGenCert.data.private_key);
+        const pkcs12Asn1 = forge.pkcs12.toPkcs12Asn1(key, [ca,cert], input.code);
+        const pkcs12Der = forge.asn1.toDer(pkcs12Asn1).getBytes();
+        const pkcs12 = forge.util.encode64(pkcs12Der);
+
+        sendPKCS12(input.email, pkcs12);
+
+        return res.json({ response: 'Success.', pkcs12: pkcs12 });
+    };
+    xhr.open('post', `${vault_addr}${vaultPkiEndpoint}/issue/client`, true);
+    vaultRequest(xhr, pkiClientToken, genCert, () => { return unknownServerFail(res) }, certConfig);
 };
 
-const vaultSignCert = (response,res,cn) => {
+const vaultSignCert = (response,res,input) => {
     if(!response.data.challengeSolved) { return res.status(402).json({ error: 'Cert not approved.' }); }
     if(response.data.serial) { return res.status(403).json({ error: 'Cert already exists.' }); }
-    const serial = response.data.serial;
+
 
 };
 
@@ -108,13 +137,27 @@ const sendRegistrationConfirmation = (address,code) => {
     });
 };
 
+const sendPKCS12 = (address,p12) => {
+    transporter.sendMail({
+        from: 'Soham Roy VPN CA <ca@vpn.sohamroy.me>',
+        to: address,
+        subject: 'VPN PKCS#12',
+        text: `Attached is the PKCS#12 file to access the VPN service. The password is your code.\n\nDo not reply to this email.`,
+        attachments: [{
+            filename: 'user.p12',
+            content: p12,
+            contentType: 'application/x-pkcs12'
+        }]
+    });
+};
+
 app.use(bodyParser.json());
 
-app.get(endpoint + '/getca',(req,res)=>{
+app.get(endpoint + '/getca',(req,res) => {
     return res.json({'cert':ca});
 });
 
-app.post(endpoint + '/getcert', [check('email').isEmail(),check('code').isBase64()], (req,res)=>{
+app.post(endpoint + '/getcert', [check('email').isEmail(),check('code').isBase64()], (req,res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty())
         return res.status(422).json({ error: 'Invalid email or code.' });
@@ -129,20 +172,32 @@ app.post(endpoint + '/getcert', [check('email').isEmail(),check('code').isBase64
     const cn = cnHash.digest('base64').substr(0,64);
     const xhrVault = new XMLHttpRequest();
     xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
-    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,cn,vaultGetCert); }, () => { return unknownServerFail(res) });
+    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,{cn:cn},vaultGetCert); }, () => { return unknownServerFail(res) });
 });
 
-// app.post(endpoint + '/signcsr',(req,res)=>{
+// app.post(endpoint + '/signcsr',(req,res) => {
 //
 // });
 
-// app.post(endpoint + '/genp12',(req,res)=>{
-//     forge.pki.certificateFromPem(pem);
-//     forge.pki.privateKeyFromPem(pem);
-//     forge.pkcs12.toPkcs12Asn1(privateKey, certificateChain, 'password');
-// });
+app.post(endpoint + '/genp12', [check('email').isEmail(),check('code').isBase64()], (req,res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+        return res.status(422).json({ error: 'Invalid email or code.' });
 
-app.post(endpoint + '/solvechallenge', [check('email').isEmail(),check('code').isBase64()], (req,res)=>{
+    const email = req.body.email;
+    const code  = req.body.code;
+
+    const cnHash = crypto.createHash('sha384');
+    const secret = Buffer.from(code, 'base64');
+    cnHash.update(email);
+    cnHash.update(secret);
+    const cn = cnHash.digest('base64').substr(0,64);
+    const xhrVault = new XMLHttpRequest();
+    xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
+    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,{cn:cn,code:code,email:email},vaultGenCert); }, () => { return unknownServerFail(res) });
+});
+
+app.post(endpoint + '/solvechallenge', [check('email').isEmail(),check('code').isBase64()], (req,res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty())
         return res.status(422).json({ error: 'Invalid email or code.' });
@@ -158,10 +213,10 @@ app.post(endpoint + '/solvechallenge', [check('email').isEmail(),check('code').i
 
     const xhrVault = new XMLHttpRequest();
     xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
-    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,cn,vaultSolveChallenge); }, () => { return unknownServerFail(res) });
+    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,{cn:cn},vaultSolveChallenge); }, () => { return unknownServerFail(res) });
 });
 
-app.post(endpoint + '/signup', [check('email').isEmail()],(req,res)=>{
+app.post(endpoint + '/signup', [check('email').isEmail()],(req,res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty())
         return res.status(422).json({ error: 'Invalid email.' });
