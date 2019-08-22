@@ -145,7 +145,7 @@ const sendPKCS12 = (address,pkcs12) => {
         subject: 'VPN PKCS#12',
         text: `Attached is the PKCS#12 file to access the VPN service. The password is your code.\n\nDo not reply to this email.`,
         attachments: [{
-            filename: 'user.p12',
+            filename: 'client.p12',
             content: pkcs12,
             contentType: 'application/x-pkcs12'
         }]
