@@ -1,0 +1,22 @@
+{
+  "name": "vpn-webpage-api",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "private": true,
+  "author": "Soham Roy",
+  "license": "MIT",
+  "scripts": {
+    "start": "node ./bin/www",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "body-parser": "*",
+    "express": "*",
+    "node-forge": "*",
+    "fs": "*",
+    "nodemailer": "*",
+    "express-validator": "*",
+    "xmlhttprequest": "*"
+  }
+}
