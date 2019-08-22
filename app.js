@@ -31,7 +31,7 @@ const unknownServerFail = (res) => {
 
 const vaultCertLookup = (response, res, cn, action) => {
     if(response.errors)
-        return res.status(400).json({ error: 'No cert found.' });
+        return res.status(404).json({ error: 'No cert found.' });
     else
         action(response,res,cn);
 };
@@ -48,8 +48,8 @@ const vaultSolveChallenge = (response,res,cn) => {
 };
 
 const vaultGetCert = (response,res,cn) => {
-    if(!response.data.challengeSolved) { return res.status(400).json({ error: 'Cert not approved.' }); }
-    if(!response.data.serial) { return res.status(400).json({ error: 'No cert found.' }); }
+    if(!response.data.challengeSolved) { return res.status(402).json({ error: 'Cert not approved.' }); }
+    if(!response.data.serial) { return res.status(404).json({ error: 'No cert found.' }); }
     const serial = response.data.serial;
     const xhr = new XMLHttpRequest();
     const sendCert = () => {
@@ -62,15 +62,15 @@ const vaultGetCert = (response,res,cn) => {
 };
 
 const vaultGenCert = (response,res,cn) => {
-    if(!response.data.challengeSolved) { return res.status(400).json({ error: 'Cert not approved.' }); }
-    if(response.data.serial) { return res.status(400).json({ error: 'Cert already exists.' }); }
+    if(!response.data.challengeSolved) { return res.status(402).json({ error: 'Cert not approved.' }); }
+    if(response.data.serial) { return res.status(403).json({ error: 'Cert already exists.' }); }
     const serial = response.data.serial;
 
 };
 
 const vaultSignCert = (response,res,cn) => {
-    if(!response.data.challengeSolved) { return res.status(400).json({ error: 'Cert not approved.' }); }
-    if(response.data.serial) { return res.status(400).json({ error: 'Cert already exists.' }); }
+    if(!response.data.challengeSolved) { return res.status(402).json({ error: 'Cert not approved.' }); }
+    if(response.data.serial) { return res.status(403).json({ error: 'Cert already exists.' }); }
     const serial = response.data.serial;
 
 };
@@ -117,7 +117,7 @@ app.get(endpoint + '/get-ca',(req,res)=>{
 app.post(endpoint + '/getcert', [check('email').isEmail(),check('code').isBase64()], (req,res)=>{
     const errors = validationResult(req);
     if (!errors.isEmpty())
-        return res.status(400).json({ error: 'Invalid email or code.' });
+        return res.status(422).json({ error: 'Invalid email or code.' });
 
     const email = req.body.email;
     const code  = req.body.code;
@@ -145,7 +145,7 @@ app.post(endpoint + '/getcert', [check('email').isEmail(),check('code').isBase64
 app.post(endpoint + '/solvechallenge', [check('email').isEmail(),check('code').isBase64()], (req,res)=>{
     const errors = validationResult(req);
     if (!errors.isEmpty())
-        return res.status(400).json({ error: 'Invalid email or code.' });
+        return res.status(422).json({ error: 'Invalid email or code.' });
 
     const email = req.body.email;
     const code  = req.body.code;
@@ -164,19 +164,19 @@ app.post(endpoint + '/solvechallenge', [check('email').isEmail(),check('code').i
 app.post(endpoint + '/signup', [check('email').isEmail()],(req,res)=>{
     const errors = validationResult(req);
     if (!errors.isEmpty())
-        return res.status(400).json({ error: 'Invalid email.' });
+        return res.status(422).json({ error: 'Invalid email.' });
 
     const xhr = new XMLHttpRequest();
     xhr.open('post','https://www.google.com/recaptcha/api/siteverify', true);
 
     if(!req.body.captcha)
-        return res.status(400).json({ error: 'Missing captcha token.' });
+        return res.status(422).json({ error: 'Missing captcha token.' });
 
     const success = () => {
         const email = req.body.email;
         const captchaVerification = JSON.parse(xhr.responseText);
         if(!captchaVerification.success || !hostnameWhitelist.includes(captchaVerification.hostname))
-            return res.status(400).json({ error: 'Invalid captcha response.' });
+            return res.status(403).json({ error: 'Invalid captcha response.' });
 
         const cnHash = crypto.createHash('sha384');
         const secret = crypto.randomBytes(384/8);
@@ -194,20 +194,15 @@ app.post(endpoint + '/signup', [check('email').isEmail()],(req,res)=>{
     };
 
     const fail = () => {
-        return res.status(500).json({ error: 'Captcha processing error.' });
+        return unknownServerFail(res);
     };
 
     request(xhr, success, fail, 'application/x-www-form-urlencoded', `secret=${captchaSecret}&response=${req.body.captcha}&remoteip=${req.connection.remoteAddress}`);
 });
 
 // 404
-app.use(function(req, res, next) {
+app.use(function(req, res) {
     return res.status(404).json({ error: 'Route '+req.url+' Not found.' });
-});
-
-// 500 - Any server error
-app.use(function(err, req, res, next) {
-    return res.status(500).json({ error: 'Server error.' });
 });
 
 app.listen(process.env.NODE_PORT || 3000);
