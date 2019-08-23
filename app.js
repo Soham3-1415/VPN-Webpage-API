@@ -85,10 +85,10 @@ const vaultGenCert = (response,res,input) => {
         const cert = forge.pki.certificateFromPem(responseGenCert.data.certificate);
         const ca = forge.pki.certificateFromPem(responseGenCert.data.issuing_ca);
         const key = forge.pki.privateKeyFromPem(responseGenCert.data.private_key);
-        const pkcs12Asn1 = forge.pkcs12.toPkcs12Asn1(key, [ca,cert], input.code);
+        const pkcs12Asn1 = forge.pkcs12.toPkcs12Asn1(key, [ca,cert], input.code, {algorithm: '3des'});
         const pkcs12Der = forge.asn1.toDer(pkcs12Asn1).getBytes();
         const pkcs12Buff = Buffer.from(pkcs12Der,'binary');
-        const pkcs12Base64 = pkcs12Buff.toString('base64');
+        const pkcs12Base64 = forge.util.encode64(pkcs12Der);
 
         sendPKCS12(input.email, pkcs12Buff);
 
