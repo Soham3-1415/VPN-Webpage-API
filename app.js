@@ -25,6 +25,10 @@ const XMLHttpRequest = require('xmlhttprequest').XMLHttpRequest;
 const hostnameWhitelist = ['vpn.sohamroy.me'];
 const nodemailer = require('nodemailer');
 
+const csrValidator = csr => {
+    return /^-----BEGIN CERTIFICATE REQUEST-----\n((?:[A-Za-z0-9+/]{4})|(?:[\n]))*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\n-----END CERTIFICATE REQUEST-----$/.test(csr);
+};
+
 const certConfigGeneral = {
     ttl: '24h'
 };
@@ -101,8 +105,25 @@ const vaultGenCert = (response,res,input) => {
 const vaultSignCert = (response,res,input) => {
     if(!response.data.challengeSolved) { return res.status(402).json({ error: 'Cert not approved.' }); }
     if(response.data.serial) { return res.status(403).json({ error: 'Cert already exists.' }); }
+    const certConfig = certConfigGeneral;
+    certConfig.common_name = input.cn;
+    certConfig.csr = input.csr;
+    const xhr = new XMLHttpRequest();
+    const signCert = () => {
+        const responseSignCert = JSON.parse(xhr.responseText);
+        if(responseSignCert.errors) { return unknownServerFail(res); }
 
+        const updatedSerial = response.data;
+        updatedSerial.serial = responseSignCert.data.serial_number;
 
+        const xhrVault = new XMLHttpRequest();
+        xhrVault.open('post',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(input.cn)}`, true);
+        vaultRequest(xhrVault, serialmapToken, () => {}, () => { return unknownServerFail(res) }, JSON.stringify(updatedSerial));
+
+        return res.json({ response: 'Success.', cert: responseSignCert.data.certificate });
+    };
+    xhr.open('post', `${vault_addr}${vaultPkiEndpoint}/sign/client`, true);
+    vaultRequest(xhr, pkiClientToken, signCert, () => { return unknownServerFail(res) }, JSON.stringify(certConfig));
 };
 
 const cnPathEncode = (cn) => {
@@ -176,9 +197,24 @@ app.post(endpoint + '/getcert', [check('email').isEmail(),check('code').isBase64
     vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,{cn:cn},vaultGetCert); }, () => { return unknownServerFail(res) });
 });
 
-// app.post(endpoint + '/signcsr',(req,res) => {
-//
-// });
+app.post(endpoint + '/signcsr', [check('email').isEmail(),check('code').isBase64(),check('csr').custom(csrValidator)], (req,res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+        return res.status(422).json({ error: 'Invalid email, code, or csr.' });
+
+    const email = req.body.email;
+    const code  = req.body.code;
+    const csr = req.body.csr;
+
+    const cnHash = crypto.createHash('sha384');
+    const secret = Buffer.from(code, 'base64');
+    cnHash.update(email);
+    cnHash.update(secret);
+    const cn = cnHash.digest('base64').substr(0,63);
+    const xhrVault = new XMLHttpRequest();
+    xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
+    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,{cn:cn,code:code,email:email,csr:csr},vaultSignCert); }, () => { return unknownServerFail(res) });
+});
 
 app.post(endpoint + '/genp12', [check('email').isEmail(),check('code').isBase64()], (req,res) => {
     const errors = validationResult(req);
