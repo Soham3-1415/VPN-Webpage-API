@@ -18,7 +18,7 @@ const pkiClientToken = fs.readFileSync(`${tokenPath}/client.${tokenSuffix}`, 'ut
 const serialmapToken = fs.readFileSync(`${tokenPath}/serial-map.${tokenSuffix}`, 'utf8');
 const captchaSecret = fs.readFileSync(`${tokenPath}/captcha.${tokenSuffix}`, 'utf8');
 const ca = fs.readFileSync(`/etc/openvpn/public/ca.crt`, 'utf8');
-const { check, validationResult } = require('express-validator');
+const {check, validationResult} = require('express-validator');
 const XMLHttpRequest = require('xmlhttprequest').XMLHttpRequest;
 const hostnameWhitelist = ['vpn.sohamroy.me'];
 const nodemailer = require('nodemailer');
@@ -32,100 +32,133 @@ const certConfigGeneral = {
 };
 
 const unknownServerFail = (res) => {
-    return res.status(500).json({ error: 'Oops.' });
+    return res.status(500).json({error: 'Oops.'});
 };
 
 const vaultCertLookup = (response, res, input, action) => {
-    if(response.errors)
-        return res.status(404).json({ error: 'No cert found.' });
+    if (response.errors)
+        return res.status(404).json({error: 'No cert found.'});
     else
-        action(response,res,input);
+        action(response, res, input);
 };
 
-const vaultSolveChallenge = (response,res,input) => {
-    if(!response.data.challengeSolved) { // Deal with unsolved challenge
+const vaultSolveChallenge = (response, res, input) => {
+    if (!response.data.challengeSolved) { // Deal with unsolved challenge
         const xhr = new XMLHttpRequest();
         xhr.open('put', `${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(input.cn)}`, true);
-        vaultRequest(xhr, serialmapToken, () => { return res.json({ response: 'Success.' }); }, () => { return unknownServerFail(res) }, JSON.stringify({challengeSolved: true}));
-    }
-    else {
-        return res.json({ response: 'Challenge already solved.' });
+        vaultRequest(xhr, serialmapToken, () => {
+            return res.json({response: 'Success.'});
+        }, () => {
+            return unknownServerFail(res)
+        }, JSON.stringify({challengeSolved: true}));
+    } else {
+        return res.json({response: 'Challenge already solved.'});
     }
 };
 
-const vaultGetCert = (response,res,input) => {
-    if(!response.data.challengeSolved) { return res.status(402).json({ error: 'Cert not approved.' }); }
-    if(!response.data.serial) { return res.status(404).json({ error: 'No cert found.' }); }
+const vaultGetCert = (response, res, input) => {
+    if (!response.data.challengeSolved) {
+        return res.status(402).json({error: 'Cert not approved.'});
+    }
+    if (!response.data.serial) {
+        return res.status(404).json({error: 'No cert found.'});
+    }
     const serial = response.data.serial;
     const xhr = new XMLHttpRequest();
     const sendCert = () => {
         const response = JSON.parse(xhr.responseText);
-        if(response.errors) { return unknownServerFail(res); }
-        return res.json({ response: 'Success.', cert: response.data.certificate });
+        if (response.errors) {
+            return unknownServerFail(res);
+        }
+        return res.json({response: 'Success.', cert: response.data.certificate});
     };
     xhr.open('get', `${vault_addr}${vaultPkiEndpoint}/cert/${serial}`, true);
-    vaultRequest(xhr, pkiPublicToken, sendCert, () => { return unknownServerFail(res) });
+    vaultRequest(xhr, pkiPublicToken, sendCert, () => {
+        return unknownServerFail(res)
+    });
 };
 
-const vaultGenCert = (response,res,input) => {
-    if(!response.data.challengeSolved) { return res.status(402).json({ error: 'Cert not approved.' }); }
-    if(response.data.serial) { return res.status(403).json({ error: 'Cert already exists.' }); }
+const vaultGenCert = (response, res, input) => {
+    if (!response.data.challengeSolved) {
+        return res.status(402).json({error: 'Cert not approved.'});
+    }
+    if (response.data.serial) {
+        return res.status(403).json({error: 'Cert already exists.'});
+    }
     const certConfig = certConfigGeneral;
     certConfig.common_name = input.cn;
     const xhr = new XMLHttpRequest();
     const genCert = () => {
         const responseGenCert = JSON.parse(xhr.responseText);
-        if(responseGenCert.errors) { return unknownServerFail(res); }
+        if (responseGenCert.errors) {
+            return unknownServerFail(res);
+        }
 
         const updatedSerial = response.data;
         updatedSerial.serial = responseGenCert.data.serial_number;
 
         const xhrVault = new XMLHttpRequest();
-        xhrVault.open('post',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(input.cn)}`, true);
-        vaultRequest(xhrVault, serialmapToken, () => {}, () => { return unknownServerFail(res) }, JSON.stringify(updatedSerial));
+        xhrVault.open('post', `${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(input.cn)}`, true);
+        vaultRequest(xhrVault, serialmapToken, () => {
+        }, () => {
+            return unknownServerFail(res)
+        }, JSON.stringify(updatedSerial));
 
         const cert = forge.pki.certificateFromPem(responseGenCert.data.certificate);
         const ca = forge.pki.certificateFromPem(responseGenCert.data.issuing_ca);
         const key = forge.pki.privateKeyFromPem(responseGenCert.data.private_key);
-        const pkcs12Asn1 = forge.pkcs12.toPkcs12Asn1(key, [cert,ca], input.code, {algorithm: '3des'});
+        const pkcs12Asn1 = forge.pkcs12.toPkcs12Asn1(key, [cert, ca], input.code, {algorithm: '3des'});
         const pkcs12Der = forge.asn1.toDer(pkcs12Asn1).getBytes();
-        const pkcs12Buff = Buffer.from(pkcs12Der,'binary');
+        const pkcs12Buff = Buffer.from(pkcs12Der, 'binary');
         const pkcs12Base64 = forge.util.encode64(pkcs12Der);
 
         sendPKCS12(input.email, pkcs12Buff);
 
-        return res.json({ response: 'Success.', pkcs12: pkcs12Base64 });
+        return res.json({response: 'Success.', pkcs12: pkcs12Base64});
     };
     xhr.open('post', `${vault_addr}${vaultPkiEndpoint}/issue/client`, true);
-    vaultRequest(xhr, pkiClientToken, genCert, () => { return unknownServerFail(res) }, JSON.stringify(certConfig));
+    vaultRequest(xhr, pkiClientToken, genCert, () => {
+        return unknownServerFail(res)
+    }, JSON.stringify(certConfig));
 };
 
-const vaultSignCert = (response,res,input) => {
-    if(!response.data.challengeSolved) { return res.status(402).json({ error: 'Cert not approved.' }); }
-    if(response.data.serial) { return res.status(403).json({ error: 'Cert already exists.' }); }
+const vaultSignCert = (response, res, input) => {
+    if (!response.data.challengeSolved) {
+        return res.status(402).json({error: 'Cert not approved.'});
+    }
+    if (response.data.serial) {
+        return res.status(403).json({error: 'Cert already exists.'});
+    }
     const certConfig = certConfigGeneral;
     certConfig.common_name = input.cn;
     certConfig.csr = input.csr;
     const xhr = new XMLHttpRequest();
     const signCert = () => {
         const responseSignCert = JSON.parse(xhr.responseText);
-        if(responseSignCert.errors) { return unknownServerFail(res); }
+        if (responseSignCert.errors) {
+            return unknownServerFail(res);
+        }
 
         const updatedSerial = response.data;
         updatedSerial.serial = responseSignCert.data.serial_number;
 
         const xhrVault = new XMLHttpRequest();
-        xhrVault.open('post',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(input.cn)}`, true);
-        vaultRequest(xhrVault, serialmapToken, () => {}, () => { return unknownServerFail(res) }, JSON.stringify(updatedSerial));
+        xhrVault.open('post', `${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(input.cn)}`, true);
+        vaultRequest(xhrVault, serialmapToken, () => {
+        }, () => {
+            return unknownServerFail(res)
+        }, JSON.stringify(updatedSerial));
 
-        return res.json({ response: 'Success.', cert: responseSignCert.data.certificate });
+        return res.json({response: 'Success.', cert: responseSignCert.data.certificate});
     };
     xhr.open('post', `${vault_addr}${vaultPkiEndpoint}/sign/client`, true);
-    vaultRequest(xhr, pkiClientToken, signCert, () => { return unknownServerFail(res) }, JSON.stringify(certConfig));
+    vaultRequest(xhr, pkiClientToken, signCert, () => {
+        return unknownServerFail(res)
+    }, JSON.stringify(certConfig));
 };
 
 const cnPathEncode = (cn) => {
-    return encodeURIComponent(cn).replace(/%/g,'-');
+    return encodeURIComponent(cn).replace(/%/g, '-');
 };
 
 const transporter = nodemailer.createTransport({
@@ -142,13 +175,13 @@ const request = (xhr, success, error, contentType, data) => {
 
 const vaultRequest = (xhr, token, success, fail, data) => {
     xhr.setRequestHeader('X-Vault-Token', token);
-    if(data)
+    if (data)
         request(xhr, success, fail, 'application/json', data);
     else
         request(xhr, success, fail, 'application/json');
 };
 
-const sendRegistrationConfirmation = (address,code) => {
+const sendRegistrationConfirmation = (address, code) => {
     transporter.sendMail({
         from: 'Soham Roy VPN Registration <registration@vpn.sohamroy.me>',
         to: address,
@@ -157,7 +190,7 @@ const sendRegistrationConfirmation = (address,code) => {
     });
 };
 
-const sendPKCS12 = (address,pkcs12) => {
+const sendPKCS12 = (address, pkcs12) => {
     transporter.sendMail({
         from: 'Soham Roy VPN CA <ca@vpn.sohamroy.me>',
         to: address,
@@ -173,114 +206,142 @@ const sendPKCS12 = (address,pkcs12) => {
 
 app.use(bodyParser.json());
 
-app.get(endpoint + '/getca',(req,res) => {
-    return res.json({'cert':ca});
+app.get(endpoint + '/getca', (req, res) => {
+    return res.json({'cert': ca});
 });
 
-app.post(endpoint + '/getcert', [check('email').isEmail(),check('code').isBase64()], (req,res) => {
+app.post(endpoint + '/getcert', [check('email').isEmail(), check('code').isBase64()], (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty())
-        return res.status(422).json({ error: 'Invalid email or code.' });
+        return res.status(422).json({error: 'Invalid email or code.'});
 
     const email = req.body.email;
-    const code  = req.body.code;
+    const code = req.body.code;
 
     const cnHash = crypto.createHash('sha384');
     const secret = Buffer.from(code, 'base64');
     cnHash.update(email);
     cnHash.update(secret);
-    const cn = cnHash.digest('base64').substr(0,63);
+    const cn = cnHash.digest('base64').substr(0, 63);
     const xhrVault = new XMLHttpRequest();
-    xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
-    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,{cn:cn},vaultGetCert); }, () => { return unknownServerFail(res) });
+    xhrVault.open('get', `${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
+    vaultRequest(xhrVault, serialmapToken, () => {
+        return vaultCertLookup(JSON.parse(xhrVault.responseText), res, {cn: cn}, vaultGetCert);
+    }, () => {
+        return unknownServerFail(res)
+    });
 });
 
-app.post(endpoint + '/signcsr', [check('email').isEmail(),check('code').isBase64(),check('csr').custom(csrValidator)], (req,res) => {
+app.post(endpoint + '/signcsr', [check('email').isEmail(), check('code').isBase64(), check('csr').custom(csrValidator)], (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty())
-        return res.status(422).json({ error: 'Invalid email, code, or csr.' });
+        return res.status(422).json({error: 'Invalid email, code, or csr.'});
 
     const email = req.body.email;
-    const code  = req.body.code;
+    const code = req.body.code;
     const csr = req.body.csr;
 
     const cnHash = crypto.createHash('sha384');
     const secret = Buffer.from(code, 'base64');
     cnHash.update(email);
     cnHash.update(secret);
-    const cn = cnHash.digest('base64').substr(0,63);
+    const cn = cnHash.digest('base64').substr(0, 63);
     const xhrVault = new XMLHttpRequest();
-    xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
-    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,{cn:cn,code:code,email:email,csr:csr},vaultSignCert); }, () => { return unknownServerFail(res) });
+    xhrVault.open('get', `${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
+    vaultRequest(xhrVault, serialmapToken, () => {
+        return vaultCertLookup(JSON.parse(xhrVault.responseText), res, {
+            cn: cn,
+            code: code,
+            email: email,
+            csr: csr
+        }, vaultSignCert);
+    }, () => {
+        return unknownServerFail(res)
+    });
 });
 
-app.post(endpoint + '/genp12', [check('email').isEmail(),check('code').isBase64()], (req,res) => {
+app.post(endpoint + '/genp12', [check('email').isEmail(), check('code').isBase64()], (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty())
-        return res.status(422).json({ error: 'Invalid email or code.' });
+        return res.status(422).json({error: 'Invalid email or code.'});
 
     const email = req.body.email;
-    const code  = req.body.code;
+    const code = req.body.code;
 
     const cnHash = crypto.createHash('sha384');
     const secret = Buffer.from(code, 'base64');
     cnHash.update(email);
     cnHash.update(secret);
-    const cn = cnHash.digest('base64').substr(0,63);
+    const cn = cnHash.digest('base64').substr(0, 63);
     const xhrVault = new XMLHttpRequest();
-    xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
-    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,{cn:cn,code:code,email:email},vaultGenCert); }, () => { return unknownServerFail(res) });
+    xhrVault.open('get', `${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
+    vaultRequest(xhrVault, serialmapToken, () => {
+        return vaultCertLookup(JSON.parse(xhrVault.responseText), res, {
+            cn: cn,
+            code: code,
+            email: email
+        }, vaultGenCert);
+    }, () => {
+        return unknownServerFail(res)
+    });
 });
 
-app.post(endpoint + '/solvechallenge', [check('email').isEmail(),check('code').isBase64()], (req,res) => {
+app.post(endpoint + '/solvechallenge', [check('email').isEmail(), check('code').isBase64()], (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty())
-        return res.status(422).json({ error: 'Invalid email or code.' });
+        return res.status(422).json({error: 'Invalid email or code.'});
 
     const email = req.body.email;
-    const code  = req.body.code;
+    const code = req.body.code;
 
     const cnHash = crypto.createHash('sha384');
     const secret = Buffer.from(code, 'base64');
     cnHash.update(email);
     cnHash.update(secret);
-    const cn = cnHash.digest('base64').substr(0,63);
+    const cn = cnHash.digest('base64').substr(0, 63);
 
     const xhrVault = new XMLHttpRequest();
-    xhrVault.open('get',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
-    vaultRequest(xhrVault, serialmapToken, () => { return vaultCertLookup(JSON.parse(xhrVault.responseText),res,{cn:cn},vaultSolveChallenge); }, () => { return unknownServerFail(res) });
+    xhrVault.open('get', `${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
+    vaultRequest(xhrVault, serialmapToken, () => {
+        return vaultCertLookup(JSON.parse(xhrVault.responseText), res, {cn: cn}, vaultSolveChallenge);
+    }, () => {
+        return unknownServerFail(res)
+    });
 });
 
-app.post(endpoint + '/signup', [check('email').isEmail()],(req,res) => {
+app.post(endpoint + '/signup', [check('email').isEmail()], (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty())
-        return res.status(422).json({ error: 'Invalid email.' });
+        return res.status(422).json({error: 'Invalid email.'});
 
     const xhr = new XMLHttpRequest();
-    xhr.open('post','https://www.google.com/recaptcha/api/siteverify', true);
+    xhr.open('post', 'https://www.google.com/recaptcha/api/siteverify', true);
 
-    if(!req.body.captcha)
-        return res.status(422).json({ error: 'Missing captcha token.' });
+    if (!req.body.captcha)
+        return res.status(422).json({error: 'Missing captcha token.'});
 
     const success = () => {
         const email = req.body.email;
         const captchaVerification = JSON.parse(xhr.responseText);
-        if(!captchaVerification.success || !hostnameWhitelist.includes(captchaVerification.hostname))
-            return res.status(403).json({ error: 'Invalid captcha response.' });
+        if (!captchaVerification.success || !hostnameWhitelist.includes(captchaVerification.hostname))
+            return res.status(403).json({error: 'Invalid captcha response.'});
 
         const cnHash = crypto.createHash('sha384');
-        const secret = crypto.randomBytes(384/8);
+        const secret = crypto.randomBytes(384 / 8);
         cnHash.update(email);
         cnHash.update(secret);
-        const cn = cnHash.digest('base64').substr(0,63);
+        const cn = cnHash.digest('base64').substr(0, 63);
 
         const xhrVault = new XMLHttpRequest();
-        xhrVault.open('post',`${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
-        vaultRequest(xhrVault, serialmapToken, () => {}, () => { return unknownServerFail(res) }, JSON.stringify({challengeSolved:false}));
+        xhrVault.open('post', `${vault_addr}${vaultSecretsEndpoint}/${cnPathEncode(cn)}`, true);
+        vaultRequest(xhrVault, serialmapToken, () => {
+        }, () => {
+            return unknownServerFail(res)
+        }, JSON.stringify({challengeSolved: false}));
 
         sendRegistrationConfirmation(email, secret.toString('base64'));
 
-        return res.json({ response: 'Success.' });
+        return res.json({response: 'Success.'});
     };
 
     const fail = () => {
@@ -291,8 +352,8 @@ app.post(endpoint + '/signup', [check('email').isEmail()],(req,res) => {
 });
 
 // 404
-app.use(function(req, res) {
-    return res.status(404).json({ error: 'Route '+req.url+' Not found.' });
+app.use(function (req, res) {
+    return res.status(404).json({error: 'Route ' + req.url + ' Not found.'});
 });
 
 app.listen(process.env.NODE_PORT || 3000);
