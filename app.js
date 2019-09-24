@@ -1,6 +1,5 @@
 'use strict';
-const path = require('path');
-const url = require('url');
+//TODO Fix redundant code
 const crypto = require('crypto');
 const tokenPath = '/tokens';
 const tokenSuffix = 'token';
@@ -16,7 +15,6 @@ const forge = require('node-forge');
 const fs = require('fs');
 const pkiPublicToken = fs.readFileSync(`${tokenPath}/public.${tokenSuffix}`, 'utf8');
 const pkiClientToken = fs.readFileSync(`${tokenPath}/client.${tokenSuffix}`, 'utf8');
-const pkiServerToken = fs.readFileSync(`${tokenPath}/server.${tokenSuffix}`, 'utf8');
 const serialmapToken = fs.readFileSync(`${tokenPath}/serial-map.${tokenSuffix}`, 'utf8');
 const captchaSecret = fs.readFileSync(`${tokenPath}/captcha.${tokenSuffix}`, 'utf8');
 const ca = fs.readFileSync(`/etc/openvpn/public/ca.crt`, 'utf8');
