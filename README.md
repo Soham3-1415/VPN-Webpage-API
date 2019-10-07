@@ -27,6 +27,7 @@ This project has not been audited.
 # Future Work
 - comment code
 - refactor to reduce redundancy
+- allow users to set a code
 - add payment gateway
 - certificate renewal
 - variable certificate expiration
