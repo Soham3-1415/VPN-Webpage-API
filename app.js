@@ -352,8 +352,16 @@ app.post(endpoint + '/signup', [check('email').isEmail()], (req, res) => {
 });
 
 // 404
-app.use(function (req, res) {
+app.use((req, res) => {
     return res.status(404).json({error: 'Route ' + req.url + ' Not found.'});
+});
+
+app.use((err, req, res, next) => {
+    if (err) {
+        return res.status(400).json({error: 'Bad request.'});
+    }
+
+    next();
 });
 
 app.listen(process.env.NODE_PORT || 3000);
