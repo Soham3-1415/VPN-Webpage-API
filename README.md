@@ -26,7 +26,7 @@ This project has not been audited.
 
 # Future Work
 - comment code
-- potential BREACH vulnerability with use of compression and transmission of secret code?
+- investigate potential BREACH vulnerability with use of compression and transmission of secret code
 - refactor to reduce redundancy
 - allow users to set a code
 - add payment gateway
