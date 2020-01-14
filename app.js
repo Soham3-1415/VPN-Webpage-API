@@ -116,7 +116,7 @@ const vaultGenCert = (response, res, input) => {
 
         return res.json({response: 'Success.', pkcs12: pkcs12Base64});
     };
-    xhr.open('post', `${vault_addr}${vaultPkiEndpoint}/issue/client`, true);
+    xhr.open('post', `${vault_addr}${vaultPkiEndpoint}/issue/client-gen`, true);
     vaultRequest(xhr, pkiClientToken, genCert, () => {
         return unknownServerFail(res)
     }, JSON.stringify(certConfig));
