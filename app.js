@@ -186,7 +186,7 @@ const sendRegistrationConfirmation = (address, code) => {
         from: 'Soham Roy VPN Registration <registration@vpn.sohamroy.me>',
         to: address,
         subject: 'VPN Registration Confirmation',
-        text: `Use the following secret code to access your certificate:\n\n${code}\n\n\nDo not reply to this email.`
+        text: `Use the following secret code to access your certificate:\n\n${code}\n\n\nThis email address is not able to receive messages. For questions and concerns, email admin@sohamroy.me.`
     });
 };
 
@@ -195,7 +195,7 @@ const sendPKCS12 = (address, pkcs12) => {
         from: 'Soham Roy VPN CA <ca@vpn.sohamroy.me>',
         to: address,
         subject: 'VPN PKCS#12',
-        text: `Attached is the PKCS#12 file to access the VPN service. The password is your code.\n\nDo not reply to this email.`,
+        text: `Attached is the PKCS#12 file to access the VPN service. The password is your code.\n\nThis email address is not able to receive messages. For questions and concerns, email admin@sohamroy.me.`,
         attachments: [{
             filename: 'client.p12',
             content: pkcs12,
