@@ -10,11 +10,8 @@ API for distributing certs for a VPN. Goes with [Soham3-1415/VPN-Webpage](https:
 - scale an OpenVPN instance
 
 # Expectations
-- Don't expect security.
-- Don't expect privacy.
-- Don't expect reliability.
-
-This project has not been audited.
+I've tried to ensure that security, privacy, and reliability have been considered, BUT
+this project has not been audited, and it's a very specific application that serves my needs.
 
 # Current Features
 - use Hashicorp's Vault for pki
